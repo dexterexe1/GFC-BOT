@@ -1,0 +1,293 @@
+"""
+config.py — Core configuration, constants, intents, and shared helpers.
+Extracted from the original monolithic bot.py. Logic unchanged.
+"""
+import os
+import datetime
+import discord
+from discord.ext import commands
+import discord.app_commands as app_commands
+import requests
+import random
+
+UTC = datetime.timezone.utc
+
+# --- CORE CONFIGURATION & INTENTS ---
+intents = discord.Intents.default()
+intents.message_content = True
+intents.members = True
+
+# Setting the message prefix strictly to '?' for commands
+bot = commands.Bot(command_prefix="?", intents=intents, help_command=None)
+
+# --- BOT OWNER IDS (YOUR DEV TEAM) ---
+# Add your Discord user IDs here - these users get FULL bot control
+BOT_OWNER_IDS = [
+    1375115918736228415,  # Replace with YOUR Discord ID
+    # 987654321098765432,  # Another dev's Discord ID (add more as needed)
+]
+
+# --- PRIVATE BOT MODE ---
+# Only these guild IDs may use the bot. Leave empty [] to allow all (not recommended).
+# Fill in your 4 server IDs (right-click server → Copy Server ID with Developer Mode on).
+ALLOWED_GUILD_IDS = [
+    # 123456789012345678,  # Server 1
+    # 234567890123456789,  # Server 2
+    # 345678901234567890,  # Server 3
+    # 456789012345678901,  # Server 4
+]
+
+# If True, bot leaves any guild not in ALLOWED_GUILD_IDS on join / ready.
+PRIVATE_GUILD_LOCK = True
+
+# If True, only staff/mods (is_staff) may run commands. Public users get blocked.
+STAFF_ONLY_MODE = True
+
+# Ticket system temporarily disabled.
+TICKETS_ENABLED = False
+
+BOT_STATUS_URL = os.getenv("BOT_STATUS_URL")
+BOT_API_SECRET = os.getenv("BOT_API_SECRET")  # must match the dashboard's BOT_API_SECRET
+
+
+def guild_is_allowed(guild_id: int | None) -> bool:
+    """Return True if the guild is allowed under PRIVATE_GUILD_LOCK."""
+    if not PRIVATE_GUILD_LOCK:
+        return True
+    if not ALLOWED_GUILD_IDS:
+        # Lock enabled but no IDs configured yet → block everything until filled.
+        return False
+    return guild_id in ALLOWED_GUILD_IDS
+
+# --- SUPPORT / DASHBOARD / INVITE LINKS ---
+# Set these as environment variables on your host (Railway/Render/VPS/etc).
+# Falling back to placeholders so the bot still boots if they're unset —
+# update the placeholders below (or set the env vars) with your real links.
+SUPPORT_SERVER_URL = os.getenv("SUPPORT_SERVER_URL", "https://discord.gg/YOUR_INVITE_CODE_HERE")
+DASHBOARD_URL = os.getenv("DASHBOARD_URL", "https://your-dashboard-website.example.com")
+INVITE_URL = os.getenv(
+    "INVITE_URL",
+    "https://discord.com/oauth2/authorize?client_id=1517342359388426351&permissions=0&integration_type=0&scope=bot+applications.commands",
+)
+
+# --- BRAND COLOR ---
+BRAND_COLOR = 0x8B5CF6  # United Bunnies purple
+
+# --- BRAND EMOJI ---
+# Replace these with your actual server custom emojis once you have them.
+# Get the full string by typing \:youremoji: in Discord chat.
+# Example: EMOJI_DIAMOND = "<:unitedbunnies_diamond:1234567890123456789>"
+EMOJI_DIAMOND = "◈"       # title decorator — swap with your custom emoji
+EMOJI_BULLET  = "›"       # field bullet   — swap with your custom emoji
+BRAND_EMOJI   = "🐰"  # Used in titles/footers (replace with your custom bunny emoji)
+
+
+def style_embed(
+    title: str,
+    *,
+    description: str | None = None,
+    fields: list[tuple[str, str, bool]] | None = None,
+    color: int | None = None,
+    footer: str | None = None,
+    kind: str = "info",
+) -> discord.Embed:
+    """Purple card-style embed like:  ◆ ALL VOUCHES ◆
+
+    kind: info | success | warn | error | mod
+    fields: list of (name, value, inline)
+    """
+    colors = {
+        "info": BRAND_COLOR,
+        "success": 0x57F287,   # green
+        "warn": 0xFEE75C,      # gold
+        "error": 0xED4245,     # red
+        "mod": 0x9B59B6,       # purple
+    }
+    c = color if color is not None else colors.get(kind, BRAND_COLOR)
+    clean_title = title.strip()
+    # Avoid double-decorating if already has diamonds
+    if not (clean_title.startswith(EMOJI_DIAMOND) or clean_title.startswith("<:")):
+        clean_title = f"{EMOJI_DIAMOND} {clean_title.upper()} {EMOJI_DIAMOND}"
+    embed = discord.Embed(title=clean_title, color=c, timestamp=datetime.datetime.now(UTC))
+    if description:
+        embed.description = description
+    if fields:
+        for name, value, inline in fields:
+            embed.add_field(name=name, value=value, inline=inline)
+    if footer:
+        embed.set_footer(text=footer)
+    return embed
+
+
+def is_staff(member: discord.Member, *, need: str = "mod") -> bool:
+    """Discord permission-based staff check (like Dyno).
+
+    Permission Levels:
+      mod → Moderate Members OR Manage Messages
+      kick → Kick Members
+      ban → Ban Members  
+      admin → Manage Server OR Administrator
+    """
+    if member is None or not isinstance(member, discord.Member):
+        return False
+    
+    perms = member.guild_permissions
+    
+    # Administrator bypasses everything
+    if perms.administrator:
+        return True
+    
+    # Bot owners bypass everything  
+    if member.id in BOT_OWNER_IDS:
+        return True
+
+    # Check specific Discord permissions
+    need = (need or "mod").lower()
+    
+    if need == "ban":
+        return perms.ban_members
+    
+    elif need == "kick":
+        return perms.kick_members or perms.ban_members
+    
+    elif need in ("admin", "setup", "config"):
+        return perms.manage_guild
+    
+    else:  # Default "mod" level
+        return (
+            perms.moderate_members or 
+            perms.manage_messages or 
+            perms.kick_members or 
+            perms.ban_members
+        )
+
+
+def staff_check(need: str = "mod"):
+    """Discord permission-based command check (like Dyno)."""
+    async def predicate(ctx: commands.Context) -> bool:
+        if ctx.guild is None:
+            return False
+        member = ctx.author
+        if not isinstance(member, discord.Member):
+            return False
+        if is_staff(member, need=need):
+            return True
+        
+        # Better error messages based on permission needed
+        perm_map = {
+            "mod": "**Moderate Members** or **Manage Messages**",
+            "kick": "**Kick Members**", 
+            "ban": "**Ban Members**",
+            "admin": "**Manage Server**"
+        }
+        required = perm_map.get(need, "**moderation permissions**")
+        raise commands.CheckFailure(f"❌ You need {required} permission to use this command.")
+    return commands.check(predicate)
+
+
+@bot.check
+async def _global_private_and_staff_check(ctx: commands.Context) -> bool:
+    """Block commands outside allowed guilds and (when STAFF_ONLY_MODE) non-staff."""
+    if ctx.guild is None:
+        # DMs: only bot owners
+        return ctx.author.id in BOT_OWNER_IDS
+
+    if not guild_is_allowed(ctx.guild.id):
+        raise commands.CheckFailure("❌ This bot is private and is not enabled for this server.")
+
+    if STAFF_ONLY_MODE:
+        member = ctx.author if isinstance(ctx.author, discord.Member) else None
+        if member is None or not is_staff(member, need="mod"):
+            raise commands.CheckFailure("❌ This bot is staff/mod only in this server.")
+
+    return True
+
+
+# --- AUTOMOD INITIALIZATION PARAMETERS ---
+# --- LEGACY AUTOMOD DEFAULTS ---
+# No longer used directly — on_message now reads live thresholds/actions from
+# mongo_bridge.get_moderation_settings() (populated from the dashboard). Left
+# here only as a reference for the bundled defaults in mongo_bridge.py.
+BANNED_WORDS = ["badword1", "badword2", "toxictext"]
+MAX_EMOJIS = 5
+MAX_PINGS = 4
+CAPS_PERCENTAGE = 0.75
+
+user_message_cooldowns = {}
+afk_users = {}
+_recent_messages = {}  # user_id -> list of recent lowercased message contents (for dupMessages filter)
+
+# --- LEVELING SYSTEM CONFIG ---
+# Global kill switch: set True only if you want built-in XP again.
+LEVELING_SYSTEM_ENABLED = False
+xp_cooldowns = {}  # user_id -> last xp grant timestamp
+XP_COOLDOWN_SECONDS = 60
+XP_MIN = 5
+XP_MAX = 15
+
+# --- TICKET SYSTEM CONFIG ---
+TICKET_CATEGORY_NAME = "🎫 Tickets"
+
+# --- MUSIC QUEUES ---
+song_queues = {}
+now_playing = {}      # guild_id -> currently playing track dict
+song_volumes = {}     # guild_id -> float (0.0 - 2.0), default 1.0
+loop_modes = {}        # guild_id -> "off" | "track" | "queue"
+
+GIPHY_API_KEY = os.getenv("GIPHY_API_KEY") or os.getenv("GIPHY_KEY")
+
+
+def fetch_giphy_gif_url(query: str):
+    if not query:
+        return None
+    if not GIPHY_API_KEY:
+        return None
+    try:
+        resp = requests.get(
+            "https://api.giphy.com/v1/gifs/search",
+            params={
+                "q": query,
+                "api_key": GIPHY_API_KEY,
+                "limit": 30,
+                "rating": "pg-13",
+            },
+            timeout=12,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        results = data.get("data") or []
+        if not results:
+            return None
+        pick = random.choice(results)
+        images = pick.get("images") or {}
+        chosen = (
+            images.get("original")
+            or images.get("downsized_large")
+            or images.get("fixed_height")
+            or images.get("fixed_width")
+        )
+        if not chosen:
+            return None
+        return chosen.get("url")
+    except Exception:
+        return None
+
+
+# Create the modern slash command group structure for '/mod'
+mod_group = app_commands.Group(
+    name="mod",
+    description="🔨 Administrative Enforcement and Moderation commands deck."
+)
+
+
+# --- SLASH COMMAND STAFF CHECK (option C) ---
+def has_required_slash_role(need: str = "mod"):
+    """Discord permission-based slash command check (like Dyno)."""
+    def predicate(interaction: discord.Interaction) -> bool:
+        if interaction.guild is None:
+            return False
+        member = interaction.user
+        if not isinstance(member, discord.Member):
+            return False
+        return is_staff(member, need=need)
+    return app_commands.check(predicate)
