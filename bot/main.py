@@ -1,5 +1,3 @@
-
-
 """
 events.py — Bot lifecycle and message/member event handlers.
 Extracted from the original monolithic bot.py. Logic unchanged.
@@ -177,7 +175,7 @@ async def on_ready():
         print(f"🔄 Successfully synced {len(synced)} slash commands globally!")
 
         # Also sync to each allowed guild so /mod updates immediately (global can take up to 1h)
-        from bot.config import ALLOWED_GUILD_IDS
+        # Use already-imported module global (do NOT re-import name here — causes UnboundLocalError)
         guild_ids = list(ALLOWED_GUILD_IDS) if ALLOWED_GUILD_IDS else [g.id for g in bot.guilds]
         for gid in guild_ids:
             try:
