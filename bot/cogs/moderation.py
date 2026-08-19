@@ -8,6 +8,32 @@ from discord.ext import commands
 import discord.app_commands as app_commands
 import datetime
 
+
+async def _dm_moderation(member: discord.Member, title: str, description: str):
+    """Best-effort moderation DM; never prevents the moderation action."""
+    try:
+        await member.send(view=style_card_view(title, kind="mod", description=description, footer=f"Server: {member.guild.name}"))
+        return True
+    except (discord.Forbidden, discord.HTTPException):
+        return False
+
+
+async def _validate_target(ctx, member: discord.Member, action: str):
+    if member.id == ctx.author.id:
+        await ctx.send(view=quick_card_view(f"❌ You can't {action} yourself."))
+        return False
+    if ctx.guild.me and member.id == ctx.guild.me.id:
+        await ctx.send(view=quick_card_view(f"❌ I can't {action} myself."))
+        return False
+    if ctx.author.id != ctx.guild.owner_id and member.top_role >= ctx.author.top_role:
+        await ctx.send(view=quick_card_view(f"❌ You can't {action} someone with an equal or higher role than you."))
+        return False
+    if ctx.guild.me and member.top_role >= ctx.guild.me.top_role:
+        await ctx.send(view=quick_card_view(f"❌ I can't {action} that user because their role is equal to or higher than my highest role."))
+        return False
+    return True
+
+
 from bot.config import bot, style_embed, style_embed, staff_check, is_staff, UTC, EMOJI_BULLET
 from bot.database import (
     get_warnings, update_warnings, reset_warnings,
@@ -26,9 +52,16 @@ async def warn_prefix(ctx, member: discord.Member = None, *, reason: str = "No r
     if member is None:
         await ctx.send(view=quick_card_view("❌ Syntax: `?warn @user [reason]`"))
         return
+    if not await _validate_target(ctx, member, "warn"):
+        return
     # Unlimited warnings — always recorded in DB (no auto-timeout / no 3-strike cap)
     current = update_warnings(member.id, 1)
     add_warn_log(ctx.guild.id, member.id, ctx.author.id, reason)
+    await _dm_moderation(
+        member,
+        "You Have Been Warned",
+        f"{EMOJI_BULLET} server: **{ctx.guild.name}**\n{EMOJI_BULLET} moderator: **{ctx.author}**\n{EMOJI_BULLET} reason: {reason}\n{EMOJI_BULLET} total warnings: **{current}**",
+    )
     view = style_card_view(
         "Warning Issued",
         kind="warn",
@@ -82,7 +115,14 @@ async def mute_prefix(ctx, member: discord.Member = None, minutes: int = 10, *, 
     if member is None:
         await ctx.send(view=quick_card_view("❌ Syntax: `?mute @user [minutes] [reason]`"))
         return
+    if not await _validate_target(ctx, member, "mute"):
+        return
     minutes = max(1, min(40320, minutes))  # Discord's timeout cap is 28 days
+    await _dm_moderation(
+        member,
+        "You Have Been Muted",
+        f"{EMOJI_BULLET} server: **{ctx.guild.name}**\n{EMOJI_BULLET} moderator: **{ctx.author}**\n{EMOJI_BULLET} duration: **{minutes} minutes**\n{EMOJI_BULLET} reason: {reason}",
+    )
     try:
         await member.timeout(datetime.timedelta(minutes=minutes), reason=f"{reason} (by {ctx.author})")
     except discord.Forbidden:
@@ -126,8 +166,7 @@ async def kick_prefix(ctx, member: discord.Member = None, *, reason: str = "No r
     if member is None:
         await ctx.send(view=quick_card_view("❌ Syntax: `?kick @user [reason]`"))
         return
-    if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
-        await ctx.send(view=quick_card_view("❌ You can't kick someone with an equal or higher role than you."))
+    if not await _validate_target(ctx, member, "kick"):
         return
     try:
         await member.kick(reason=f"{reason} (by {ctx.author})")
@@ -153,10 +192,14 @@ async def ban_prefix(ctx, member: discord.Member = None, *, reason: str = "No re
         await ctx.send(view=quick_card_view("❌ Syntax: `?ban @user [reason]`"))
         return
         
-    if member.top_role >= ctx.author.top_role and ctx.author.id != ctx.guild.owner_id:
-        await ctx.send(view=quick_card_view("❌ You can't ban someone with an equal or higher role than you."))
+    if not await _validate_target(ctx, member, "ban"):
         return
-        
+
+    await _dm_moderation(
+        member,
+        "You Have Been Banned",
+        f"{EMOJI_BULLET} server: **{ctx.guild.name}**\n{EMOJI_BULLET} moderator: **{ctx.author}**\n{EMOJI_BULLET} reason: {reason}",
+    )
     try:
         await member.ban(reason=f"{reason} (by {ctx.author})")
     except discord.Forbidden:
@@ -197,5 +240,3 @@ async def unban_prefix(ctx, user_id: int = None, *, reason: str = "No reason pro
         footer=f"ID: {user.id}",
     )
     await ctx.send(view=view)
-
-
