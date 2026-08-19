@@ -1,5 +1,3 @@
-
-
 """
 events.py — Bot lifecycle and message/member event handlers.
 Extracted from the original monolithic bot.py. Logic unchanged.
@@ -35,6 +33,33 @@ from bot.status import publish_bot_status
 from bot.config import mod_group
 from bot import mongo_bridge
 
+# --- LOAD COGS (registers hybrid/slash commands via decorators) ---
+def _load_all_cogs():
+    """Import cog modules so @bot.command / @mod_group.command decorators run."""
+    modules = [
+        "bot.cogs.moderation",
+        "bot.cogs.mod_slash",
+        "bot.cogs.community",
+        "bot.cogs.vouch",
+        "bot.cogs.revenue",
+        "bot.cogs.ai_manager",
+        "bot.cogs.bot_control",
+        "bot.cogs.role_info",
+        "bot.cogs.role_management",
+        "bot.cogs.command_lists",
+        # intentionally skipped: music, marriage, reaction_roles, tickets, applications
+    ]
+    for name in modules:
+        try:
+            __import__(name)
+            print(f"📦 Loaded {name}")
+        except Exception as e:
+            print(f"⚠️ Failed to load {name}: {e}")
+
+_load_all_cogs()
+
+
+
 
 # Persistent views (defined in feature modules)
 try:
@@ -63,11 +88,12 @@ async def on_ready():
         init_db()
         print("✅ Database initialized")
         
+        # Ensure /mod group is registered once from current code
         try:
             bot.tree.add_command(mod_group)
         except discord.app_commands.CommandAlreadyRegistered:
             pass
-    
+
     print("=" * 60)
     print(f"✨ Success! {bot.user.name} is online.")
     print(f"📋 Prefix/hybrid commands loaded: {len(bot.commands)}")
@@ -137,11 +163,35 @@ async def on_ready():
     except Exception as e:
         print(f"⚠️ Failed to re-register role menus: {e}")
 
+    # Force /mod signature refresh: remove old copy, re-add from code, then sync.
+    # Fixes: "The signature for command 'mod' is different from the one provided by Discord"
     try:
+        existing = bot.tree.get_command("mod")
+        if existing is not None:
+            bot.tree.remove_command("mod")
+        try:
+            bot.tree.add_command(mod_group)
+        except discord.app_commands.CommandAlreadyRegistered:
+            pass
+
         synced = await bot.tree.sync()
         print(f"🔄 Successfully synced {len(synced)} slash commands globally!")
+
+        # Also sync to each allowed guild so /mod updates immediately (global can take up to 1h)
+        from bot.config import ALLOWED_GUILD_IDS
+        guild_ids = list(ALLOWED_GUILD_IDS) if ALLOWED_GUILD_IDS else [g.id for g in bot.guilds]
+        for gid in guild_ids:
+            try:
+                g = discord.Object(id=int(gid))
+                bot.tree.copy_global_to(guild=g)
+                gs = await bot.tree.sync(guild=g)
+                print(f"🔄 Guild sync {gid}: {len(gs)} commands")
+            except Exception as ge:
+                print(f"⚠️ Guild sync failed for {gid}: {ge}")
     except Exception as e:
         print(f"❌ Failed to sync slash commands: {e}")
+        import traceback
+        traceback.print_exc()
 
     async def status_loop():
         while not bot.is_closed():
