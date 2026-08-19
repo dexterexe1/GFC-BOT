@@ -31,7 +31,7 @@ BOT_OWNER_IDS = [
 # Only these guild IDs may use the bot. Leave empty [] to allow all (not recommended).
 # Fill in your 4 server IDs (right-click server → Copy Server ID with Developer Mode on).
 ALLOWED_GUILD_IDS = [
-   1538193537412370433
+    # 123456789012345678,  # Server 1
     # 234567890123456789,  # Server 2
     # 345678901234567890,  # Server 3
     # 456789012345678901,  # Server 4
@@ -219,11 +219,6 @@ _recent_messages = {}  # user_id -> list of recent lowercased message contents (
 
 # --- LEVELING SYSTEM CONFIG ---
 # Global kill switch: set True only if you want built-in XP again.
-LEVELING_SYSTEM_ENABLED = False
-xp_cooldowns = {}  # user_id -> last xp grant timestamp
-XP_COOLDOWN_SECONDS = 60
-XP_MIN = 5
-XP_MAX = 15
 
 # --- TICKET SYSTEM CONFIG ---
 TICKET_CATEGORY_NAME = "🎫 Tickets"

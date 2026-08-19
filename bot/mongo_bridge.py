@@ -52,22 +52,10 @@ _custom_commands: dict[int, list[dict]] = {}           # guild_id -> [command, .
 _auto_responses: dict[int, list[dict]] = {}            # guild_id -> [response, ...]
 _moderation_settings: dict[int, dict] = {}             # guild_id -> settings dict
 _reaction_panels: dict[int, list[dict]] = {}            # guild_id -> [panel, ...]
-_leveling_settings: dict[int, dict] = {}                # guild_id -> settings dict
 _welcome_settings: dict[int, dict] = {}                 # guild_id -> settings dict
 _application_forms: dict[int, list[dict]] = {}          # guild_id -> [application form, ...]
 _last_refresh = 0.0
 
-DEFAULT_LEVELING_SETTINGS = {
-    "enabled": False,
-    "xpMin": 5,
-    "xpMax": 15,
-    "cooldownSeconds": 60,
-    "levelupChannelName": "",  # blank = post in the channel where the member leveled up
-    "stackRoles": True,
-    "roleRewards": [],  # [{"level": int, "roleName": str}, ...]
-    "ignoredChannels": [],
-    "ignoredRoles": [],
-}
 
 DEFAULT_WELCOME_SETTINGS = {
     "join": {
@@ -155,7 +143,6 @@ async def refresh():
         autos = await _db["autoResponses"].find().to_list(length=None)
         moderation = await _db["moderationSettings"].find().to_list(length=None)
         panels = await _db["reactionRolePanels"].find().to_list(length=None)
-        leveling = await _db["levelingSettings"].find().to_list(length=None)
         welcome = await _db["welcomeSettings"].find().to_list(length=None)
         application_forms = await _db["applicationForms"].find().to_list(length=None)
 
@@ -192,11 +179,6 @@ async def refresh():
             gid = int(p["guildId"])
             new_panels.setdefault(gid, []).append(p)
 
-        new_leveling: dict[int, dict] = {}
-        for l in leveling:
-            gid = int(l["guildId"])
-            new_leveling[gid] = _deep_merge_defaults(DEFAULT_LEVELING_SETTINGS, l)
-
         new_welcome: dict[int, dict] = {}
         for w in welcome:
             gid = int(w["guildId"])
@@ -207,13 +189,12 @@ async def refresh():
             gid = int(af["guildId"])
             new_application_forms.setdefault(gid, []).append(af)
 
-        global _disabled_commands, _custom_commands, _auto_responses, _moderation_settings, _reaction_panels, _leveling_settings, _welcome_settings, _application_forms
+        global _disabled_commands, _custom_commands, _auto_responses, _moderation_settings, _reaction_panels, _welcome_settings, _application_forms
         _disabled_commands = new_disabled
         _custom_commands = new_customs
         _auto_responses = new_autos
         _moderation_settings = new_moderation
         _reaction_panels = new_panels
-        _leveling_settings = new_leveling
         _welcome_settings = new_welcome
         _application_forms = new_application_forms
         _last_refresh = time.time()
@@ -378,40 +359,11 @@ async def bump_uses(collection: str, doc_id) -> None:
         pass  # best-effort; never let a stats update break the bot
 
 
-def get_leveling_settings(guild_id: int) -> dict:
-    return _leveling_settings.get(guild_id, DEFAULT_LEVELING_SETTINGS)
-
 
 def get_welcome_settings(guild_id: int) -> dict:
     return _welcome_settings.get(guild_id, DEFAULT_WELCOME_SETTINGS)
 
 
-def is_leveling_ignored(guild_id: int, member, channel) -> bool:
-    settings = get_leveling_settings(guild_id)
-    channel_name = getattr(channel, "name", "")
-    if channel_name and channel_name in settings.get("ignoredChannels", []):
-        return True
-    ignored_roles = {r.lower() for r in settings.get("ignoredRoles", [])}
-    if ignored_roles and any(r.name.lower() in ignored_roles for r in getattr(member, "roles", [])):
-        return True
-    return False
-
-
-async def push_leaderboard(guild_id: int, entries: list[dict]) -> None:
-    """Bot -> dashboard, one-way: writes a leaderboard snapshot so the
-    website can display it without needing a live query into the bot's
-    SQLite database. `entries` is a list of
-    {userId, username, avatarUrl, xp, level}, already sorted highest first."""
-    if _db is None:
-        return
-    try:
-        await _db["guildLeaderboards"].update_one(
-            {"guildId": str(guild_id)},
-            {"$set": {"guildId": str(guild_id), "entries": entries, "updatedAt": time.time()}},
-            upsert=True,
-        )
-    except Exception as e:
-        print(f"⚠️ mongo_bridge: failed to push leaderboard for guild {guild_id}: {e}")
 
 
 def get_reaction_panels(guild_id: int) -> list[dict]:

@@ -1,5 +1,5 @@
 """
-community.py — Help menu, control panel, setup dropdowns, announcements, leveling cmds, dashboard links, no-prefix helpers.
+community.py — Help menu, control panel, setup dropdowns, announcements, dashboard links, no-prefix helpers.
 Extracted from the original monolithic bot.py. Logic unchanged.
 """
 from bot.ui.premium_cards import quick_card_view, style_card_view, fun_card_view, embed_to_view
@@ -16,12 +16,10 @@ from bot.config import (
     bot, style_embed, style_embed, UTC, BRAND_COLOR,
     afk_users,
     SUPPORT_SERVER_URL, DASHBOARD_URL, INVITE_URL, GIPHY_API_KEY, fetch_giphy_gif_url,
-    has_required_slash_role, mod_group, LEVELING_SYSTEM_ENABLED, EMOJI_BULLET, staff_check,
+    has_required_slash_role, mod_group, EMOJI_BULLET, staff_check,
 )
 from bot.database import (
-    get_level_data, add_xp, level_leaderboard, xp_for_level,
-    is_leveling_enabled, get_levelup_channel,
-    get_all_role_menu_message_ids, get_role_menu_items,
+        get_all_role_menu_message_ids, get_role_menu_items,
     has_noprefix_perm, get_trusted_role_id, list_noprefix_users,
     set_config, get_config, add_vouch, count_vouches,
 )
@@ -33,7 +31,6 @@ def make_progress_bar(current: int, needed: int, length: int = 15) -> str:
     return "█" * filled + "░" * (length - filled)
 
 
-# Leveling commands (?rank, ?levelleaderboard), ?dashboard removed by request.
 
 
 # --- ANNOUNCE ?p ---

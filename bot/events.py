@@ -15,15 +15,12 @@ import time
 from bot.config import (
     bot, style_embed, style_embed, UTC, BRAND_COLOR,
     user_message_cooldowns, afk_users, _recent_messages,
-    xp_cooldowns, XP_COOLDOWN_SECONDS, XP_MIN, XP_MAX,
-    LEVELING_SYSTEM_ENABLED,
-    EMOJI_BULLET, BOT_OWNER_IDS,
+        EMOJI_BULLET, BOT_OWNER_IDS,
     TICKETS_ENABLED, PRIVATE_GUILD_LOCK, ALLOWED_GUILD_IDS, guild_is_allowed,
 )
 from bot.database import (
     get_config, get_welcome_message, format_welcome_message,
-    is_leveling_enabled, get_levelup_channel, add_xp, xp_for_level,
-    get_level_data, has_noprefix_perm, level_leaderboard,
+    has_noprefix_perm,
     get_all_role_menu_message_ids, get_role_menu_items,
     get_vouch_channel, add_vouch, count_vouches, get_custom_command,
     update_warnings, reset_warnings,
@@ -178,10 +175,6 @@ async def on_ready():
             bot.loop.create_task(reaction_panel_post_loop())
     except Exception as e:
         print(f"⚠️ reaction_panel_post_loop not started: {e}")
-
-    if LEVELING_SYSTEM_ENABLED:
-        if not _background_tasks_started:
-            bot.loop.create_task(leaderboard_push_loop())
     _background_tasks_started = True
 
 # --- GUILD LIST FRESHNESS ---
@@ -392,83 +385,6 @@ async def send_noprefix_confirmation(message: discord.Message, command_name: str
 # live in this single function or the earlier registrations get silently
 # dropped.
 
-async def handle_leveling(message):
-    """Grants XP when LEVELING_SYSTEM_ENABLED is True. Disabled by default."""
-    if not LEVELING_SYSTEM_ENABLED:
-        return
-    guild = message.guild
-    author = message.author
-    settings = mongo_bridge.get_leveling_settings(guild.id) if mongo_bridge.enabled() else {
-        **mongo_bridge.DEFAULT_LEVELING_SETTINGS, "enabled": is_leveling_enabled(guild.id),
-        "xpMin": XP_MIN, "xpMax": XP_MAX, "cooldownSeconds": XP_COOLDOWN_SECONDS,
-    }
-    if not settings.get("enabled", True):
-        return
-    if mongo_bridge.enabled() and mongo_bridge.is_leveling_ignored(guild.id, author, message.channel):
-        return
-
-    now = datetime.datetime.now()
-    last_grant = xp_cooldowns.get(author.id)
-    if last_grant and (now - last_grant).total_seconds() < settings["cooldownSeconds"]:
-        return
-    xp_cooldowns[author.id] = now
-
-    gained = random.randint(settings["xpMin"], settings["xpMax"])
-    new_xp, new_level, leveled_up = add_xp(guild.id, author.id, gained)
-    if not leveled_up:
-        return
-
-    # Role rewards: grant the highest-threshold role the member has reached.
-    # stackRoles=True keeps every lower-tier reward role too; False swaps up.
-    rewards = sorted(settings.get("roleRewards", []), key=lambda r: r.get("level", 0))
-    earned = [r for r in rewards if r.get("level", 0) <= new_level]
-    if earned:
-        try:
-            top_role = discord.utils.get(guild.roles, name=earned[-1]["roleName"])
-            if top_role and top_role not in author.roles:
-                await author.add_roles(top_role, reason=f"Leveling reward: reached level {new_level}")
-            if not settings.get("stackRoles", True):
-                lower_role_names = {r["roleName"] for r in earned[:-1]}
-                lower_roles = [r for r in author.roles if r.name in lower_role_names]
-                if lower_roles:
-                    await author.remove_roles(*lower_roles, reason="Leveling reward: superseded by a higher tier")
-        except discord.Forbidden:
-            pass
-
-    embed = discord.Embed(
-        description=f"🎉 **{author.display_name}** leveled up to **Level {new_level}**!",
-        color=discord.Color.gold(),
-    )
-    channel_name = settings.get("levelupChannelName")
-    target_channel = discord.utils.get(guild.text_channels, name=channel_name) if channel_name else None
-    if not target_channel:
-        legacy_channel_id = get_levelup_channel(guild.id)
-        target_channel = bot.get_channel(legacy_channel_id) if legacy_channel_id else message.channel
-    if target_channel:
-        await target_channel.send(embed=embed, delete_after=10)
-
-
-async def leaderboard_push_loop():
-    """Every ~60s, snapshots the top 10 XP earners per guild into MongoDB so
-    the dashboard's Leveling tab can show a real leaderboard without needing
-    a live connection into the bot's SQLite database."""
-    await bot.wait_until_ready()
-    while not bot.is_closed():
-        if mongo_bridge.enabled():
-            for guild in bot.guilds:
-                rows = level_leaderboard(guild.id, limit=10)
-                entries = []
-                for user_id, xp, level in rows:
-                    member = guild.get_member(user_id)
-                    entries.append({
-                        "userId": str(user_id),
-                        "username": member.display_name if member else f"User {user_id}",
-                        "avatarUrl": str(member.display_avatar.url) if member else None,
-                        "xp": xp,
-                        "level": level,
-                    })
-                await mongo_bridge.push_leaderboard(guild.id, entries)
-        await asyncio.sleep(60)
 
 
 @bot.event
@@ -635,7 +551,6 @@ async def on_message(message):
 
     # Staff with Manage Messages skip automod, but MUST still run prefix commands.
     if message.author.guild_permissions.manage_messages:
-        await handle_leveling(message)
         await bot.process_commands(message)
         return
 
@@ -645,8 +560,7 @@ async def on_message(message):
     am = settings["automod"]
 
     if mongo_bridge.enabled() and mongo_bridge.is_ignored(message.guild.id, message.author, message.channel):
-        # Still let leveling/commands run for exempt members — just skip automod.
-        await handle_leveling(message)
+        # Still let commands run for exempt members — just skip automod.
         await bot.process_commands(message)
         return
 
@@ -771,7 +685,6 @@ async def on_message(message):
             return
 
     # --- LEVELING: grant XP for messages that passed every automod check ---
-    await handle_leveling(message)
 
     # Fallback: ensure any remaining prefix commands still process
     await bot.process_commands(message)

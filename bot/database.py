@@ -90,10 +90,6 @@ def init_db():
         cursor.execute("ALTER TABLE server_config ADD COLUMN trusted_role_id INTEGER DEFAULT NULL")
     if "welcome_message" not in existing_cols:
         cursor.execute("ALTER TABLE server_config ADD COLUMN welcome_message TEXT DEFAULT NULL")
-    if "levelup_channel_id" not in existing_cols:
-        cursor.execute("ALTER TABLE server_config ADD COLUMN levelup_channel_id INTEGER DEFAULT NULL")
-    if "levels_enabled" not in existing_cols:
-        cursor.execute("ALTER TABLE server_config ADD COLUMN levels_enabled INTEGER DEFAULT 0")
     if "revenue_channel_id" not in existing_cols:
         cursor.execute("ALTER TABLE server_config ADD COLUMN revenue_channel_id INTEGER DEFAULT NULL")
     cursor.execute("""
@@ -130,15 +126,6 @@ def init_db():
             author_id INTEGER NOT NULL,
             comment TEXT,
             created_at TEXT
-        )
-    """)
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS levels (
-            guild_id INTEGER NOT NULL,
-            user_id INTEGER NOT NULL,
-            xp INTEGER DEFAULT 0,
-            level INTEGER DEFAULT 0,
-            PRIMARY KEY (guild_id, user_id)
         )
     """)
     cursor.execute("""
@@ -611,49 +598,9 @@ def vouch_leaderboard(guild_id: int, limit: int = 10):
     return rows
 
 # --- LEVELING SYSTEM DB UTILITIES ---
-def xp_for_level(level: int) -> int:
-    # Total XP required to reach this level. Gently increasing curve.
-    return 5 * (level ** 2) + 50 * level + 100
 
-def get_level_data(guild_id: int, user_id: int):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT xp, level FROM levels WHERE guild_id = ? AND user_id = ?", (guild_id, user_id))
-    row = cursor.fetchone()
-    conn.close()
-    return row if row else (0, 0)
 
-def add_xp(guild_id: int, user_id: int, amount: int):
-    """Adds XP and returns (new_xp, new_level, leveled_up: bool)."""
-    xp, level = get_level_data(guild_id, user_id)
-    new_xp = xp + amount
-    new_level = level
-    while new_xp >= xp_for_level(new_level + 1):
-        new_level += 1
 
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        INSERT INTO levels (guild_id, user_id, xp, level) VALUES (?, ?, ?, ?)
-        ON CONFLICT(guild_id, user_id) DO UPDATE SET xp = ?, level = ?
-        """,
-        (guild_id, user_id, new_xp, new_level, new_xp, new_level),
-    )
-    conn.commit()
-    conn.close()
-    return new_xp, new_level, new_level > level
-
-def level_leaderboard(guild_id: int, limit: int = 10):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT user_id, xp, level FROM levels WHERE guild_id = ? ORDER BY xp DESC LIMIT ?",
-        (guild_id, limit),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
 
 # --- REACTION ROLES DB UTILITIES ---
 def add_reaction_role(guild_id: int, message_id: int, emoji: str, role_id: int):
@@ -855,54 +802,7 @@ def format_welcome_message(template: str, member: discord.Member) -> str:
     )
 
 # --- LEVELING CONFIG DB UTILITIES ---
-def get_levelup_channel(guild_id: int):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT levelup_channel_id FROM server_config WHERE guild_id = ?", (guild_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return row[0] if row and row[0] else None
 
-def set_levelup_channel(guild_id: int, channel_id: int):
-    welcome, logs = get_config(guild_id)
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO server_config (guild_id, welcome_channel_id, log_channel_id, levelup_channel_id)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET levelup_channel_id = ?
-    """, (guild_id, welcome, logs, channel_id, channel_id))
-    conn.commit()
-    conn.close()
-
-def clear_levelup_channel(guild_id: int):
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE server_config SET levelup_channel_id = NULL WHERE guild_id = ?", (guild_id,))
-    conn.commit()
-    conn.close()
-
-def is_leveling_enabled(guild_id: int) -> bool:
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("SELECT levels_enabled FROM server_config WHERE guild_id = ?", (guild_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row is None or row[0] is None:
-        return False  # leveling off by default (use external leveling bots)
-    return bool(row[0])
-
-def set_leveling_enabled(guild_id: int, enabled: bool):
-    welcome, logs = get_config(guild_id)
-    conn = sqlite3.connect(DB_FILE)
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO server_config (guild_id, welcome_channel_id, log_channel_id, levels_enabled)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET levels_enabled = ?
-    """, (guild_id, welcome, logs, int(enabled), int(enabled)))
-    conn.commit()
-    conn.close()
 
 # --- COMMAND PERMISSIONS DB UTILITIES ---
 def get_command_permission_roles(guild_id: int, command_name: str):

@@ -13,7 +13,6 @@ from bot.cogs.community import build_help_home_embed, HelpView
 from bot.database import (
     set_config, get_config,
     set_welcome_message, clear_welcome_message, format_welcome_message,
-    set_levelup_channel, clear_levelup_channel, set_leveling_enabled,
     set_trusted_role_id, clear_trusted_role_id,
     grant_noprefix, revoke_noprefix, list_noprefix_users, get_trusted_role_id,
     update_warnings, get_warnings, reset_warnings,
@@ -30,107 +29,20 @@ async def setup_slash(interaction: discord.Interaction):
     await interaction.response.send_message(
         embed=discord.Embed(
             title="🛠️ Server Configuration Dashboard",
-            description="Use the commands in `/mod help` to configure moderation, welcome, leveling, logs, and no-prefix settings. The dashboard link is available from the bot help menu.",
+            description="Use the commands in `/mod help` to configure moderation, welcome, logs, and no-prefix settings. The dashboard link is available from the bot help menu.",
         ),
         view=HelpView(),
         ephemeral=True,
     )
 
-@mod_group.command(name="help", description="🔨 View the Administrative Enforcement Deck.")
+@mod_group.command(name="help", description="📚 Show the staff command help menu.")
 @has_required_slash_role()
 async def mod_help_slash(interaction: discord.Interaction):
-    embed = discord.Embed(
-        title="🔨 Administrative Staff Enforcement Deck", 
-        description="Comprehensive matrix listing all available automated and manual system tools:",
-        color=discord.Color.orange()
-    )
-    
-    embed.add_field(
-        name="`⚙️ Configuration Modules`", 
-        value=(
-            "• `/mod setup` — Launches the interactive dropdown UI config dashboard.\n"
-            "• `/mod setwelcome <channel>` — Manually routes member join greeting embeds.\n"
-            "• `/mod setwelcomemessage <text>` / `/mod clearwelcomemessage` — Customize the greeting text.\n"
-            "• `/mod setlogs <channel>` — Manually maps text edit and deletion tracking streams.\n"
-            "• `/mod setlevelchannel <channel>` / `/mod clearlevelchannel` — Where level-ups get posted.\n"
-            "• `/mod togglelevels <true/false>` — Turn the leveling/XP system on or off.\n"
-            "• `/cmdperm-allow/deny/list/reset` — Restrict specific commands to specific roles.\n"
-            "• `/new-command`, `/delete-command`, `/list-commands` — Custom auto-reply triggers.\n"
-            "• `/mod panel` — Posts the interactive control panel (tickets, vouching, info, music, rank)."
-        ), 
-        inline=False
-    )
-    
-    embed.add_field(
-        name="`⚔️ Active Enforcement Parameters`", 
-        value=(
-            "• `/mod warn` or `?warn` / `?w` — Warn (auto-timeout at 3).\n"
-            "• `/mod warnings` or `?warnings` / `?warns` — Check warns.\n"
-            "• `/mod clearwarnings` or `?cw` / `?clearwarns` — Clear warns.\n"
-            "• `/mod mute` or `?mute` / `?timeout` · `/mod unmute` or `?unmute`\n"
-            "• `/mod kick` or `?kick` / `?k` · `/mod ban` or `?ban` / `?b`\n"
-            "• `/mod unban` or `?unban` / `?ub` · `/mod clear <amount>`\n"
-            "• `?reactionrole` / `?rr` — Reaction roles · `?bon` — Joke ban."
-        ), 
-        inline=False
-    )
+    """Same help menu as ?help — under /mod help."""
+    embed = build_help_home_embed()
+    await interaction.response.send_message(embed=embed, view=HelpView(), ephemeral=True)
 
-    embed.add_field(
-        name="`📢 Public Server Broadcasts`", 
-        value=(
-            "• `?p [text]` — Generates the matrix announcement template with custom block structures.\n"
-            "• `?ticketpanel` — Posts a standalone button for members to open support tickets."
-        ), 
-        inline=False
-    )
-    
-    embed.add_field(
-        name="`💰 Revenue Tracking`", 
-        value=(
-            "• `?setrevenuechannel #channel` — Enable automatic revenue tracking.\n"
-            "• `?weekrevenue` / `?week` — Last 7 days report.\n"
-            "• `?monthrevenue` / `?month` — Last 30 days report.\n"
-            "• `?todayrevenue` / `?today` — Today's report.\n"
-            "• `?allrevenue` — All-time report (Admin only).\n"
-            "• `?revenuevia \"staff\"` — Specific staff member report.\n"
-            "• `?revenuedetails [days]` — Transaction history.\n"
-            "• `?revenuehelp` — Show format & setup guide.\n"
-            "• **All staff/mods can use revenue commands automatically!**"
-        ), 
-        inline=False
-    )
-    
-    embed.add_field(
-        name="`🤖 Premium AI Manager`",
-        value=(
-            "• `?ai <question>` / `/ai` — Ask the server-specific AI about prices, rules, services, quotes, and staff guidance.\n"
-            "• `?aihelp` — Full AI command guide and access status.\n"
-            "• `?aiimportprice <title> <data>` — Save a pricing sheet for this server.\n"
-            "• `?aiimportrules <title> <rules>` — Save rules/policies for this server.\n"
-            "• `?aiprice set/list/remove/clear` — Manage structured prices.\n"
-            "• `?airule add/list/remove/clear` — Manage structured rules.\n"
-            "• `?aiservice add/list/remove/clear` — Manage the service catalog.\n"
-            "• `?aiconfig` / `?aiconfig manager @role` — View AI settings or choose the AI Manager role.\n"
-            "• `?aiclear` — Clear all AI Manager data for this server.\n"
-            "• **AI Manager Role:** set with `?aiconfig manager @role`; when not set, normal staff permissions are used.\n"
-            "• AI commands are available only when the **bot owner has enabled AI for this server**. AI non-prefix also requires the bot owner to enable non-prefix.\n"
-        ),
-        inline=False
-    )
 
-    embed.add_field(
-        name="`🎭 Role Information`", 
-        value=(
-            "• `?roles` — List all server roles.\n"
-            "• `?roleinfo [@role]` — Show role with key permissions.\n"
-            "• `?rolefullinfo @role` — Complete role details & permissions.\n"
-            "• `?rolehelp` — Show help."
-        ), 
-        inline=False
-    )
-    
-    embed.set_footer(text="Core Security Verification Required • Commands limited strictly to Authorization Role ID.")
-    await interaction.response.send_message(view=embed_to_view(embed))
 
 @mod_group.command(name="setwelcome", description="🎯 Set targeted greeting text channel updates.")
 @has_required_slash_role()
@@ -164,25 +76,8 @@ async def clearwelcomemessage_slash(interaction: discord.Interaction):
     clear_welcome_message(interaction.guild.id)
     await interaction.response.send_message(view=quick_card_view("✅ Welcome message reset to the default."))
 
-@mod_group.command(name="setlevelchannel", description="📈 Set the channel where level-up announcements are posted.")
-@has_required_slash_role()
-async def setlevelchannel_slash(interaction: discord.Interaction, channel: discord.TextChannel):
-    set_levelup_channel(interaction.guild.id, channel.id)
-    await interaction.response.send_message(view=quick_card_view(f"📈 **Level-up announcements will now post in:** {channel.mention}"))
 
-@mod_group.command(name="clearlevelchannel", description="📈 Post level-ups in whichever channel the user leveled up in.")
-@has_required_slash_role()
-async def clearlevelchannel_slash(interaction: discord.Interaction):
-    clear_levelup_channel(interaction.guild.id)
-    await interaction.response.send_message(view=quick_card_view("✅ Level-up announcements will post in the channel the member was chatting in."))
 
-@mod_group.command(name="togglelevels", description="📈 Turn the leveling/XP system on or off for this server.")
-@has_required_slash_role()
-@app_commands.describe(enabled="True to enable XP gain, False to disable it")
-async def togglelevels_slash(interaction: discord.Interaction, enabled: bool):
-    set_leveling_enabled(interaction.guild.id, enabled)
-    status = "enabled ✅" if enabled else "disabled ❌"
-    await interaction.response.send_message(view=quick_card_view(f"📈 Leveling system is now **{status}** in this server."))
 
 @mod_group.command(name="clear", description="🗑️ Purge text streams from active channels.")
 @has_required_slash_role()
