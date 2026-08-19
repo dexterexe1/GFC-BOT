@@ -57,6 +57,72 @@ _IMPORT_TIMEOUT_SECONDS = 10 * 60
 _IMPORT_MAX_MESSAGES = 100
 _IMPORT_MAX_CHARS = 120_000
 
+# Maximum amount of live bot-command documentation included in an AI request.
+# The catalog is generated from commands currently registered on the bot, so
+# AI Help stays in sync when commands are added/removed from cogs.
+_COMMAND_CATALOG_MAX_CHARS = 14_000
+
+
+def _command_usage(command: Any) -> str:
+    """Build a compact, human-readable usage string from a discord.py command."""
+    parts: list[str] = []
+    params = getattr(command, 'clean_params', None) or getattr(command, 'params', {}) or {}
+    if isinstance(params, dict):
+        for name, param in params.items():
+            # Ignore context/self parameters that are not user supplied.
+            if name in {'ctx', 'interaction', 'self'}:
+                continue
+            required = getattr(param, 'required', True)
+            parts.append(f"<{name}>" if required else f"[{name}]")
+    return f"{getattr(command, 'qualified_name', getattr(command, 'name', 'unknown'))}" + (" " + " ".join(parts) if parts else "")
+
+
+def _command_catalog(query: str = '', max_chars: int = _COMMAND_CATALOG_MAX_CHARS) -> str:
+    """Return live documentation for commands registered on this bot.
+
+    This intentionally reads bot.commands at request time instead of maintaining
+    a second hard-coded command list. That means AI Help automatically follows
+    the actual cogs loaded by main.py.
+    """
+    commands_list = []
+    seen: set[str] = set()
+    q = (query or '').lower().strip()
+    q_tokens = {t for t in re.findall(r'[a-z0-9_?-]+', q) if len(t) > 1}
+
+    for command in getattr(bot, 'commands', []):
+        name = str(getattr(command, 'qualified_name', getattr(command, 'name', '')) or '').strip()
+        if not name or name in seen or name in {'ai', 'aihelp'}:
+            continue
+        seen.add(name)
+        description = str(getattr(command, 'help', '') or getattr(command, 'description', '') or 'No description provided.').strip()
+        aliases = [str(a) for a in (getattr(command, 'aliases', None) or []) if a]
+        haystack = f"{name} {description} {' '.join(aliases)}".lower()
+        score = 0
+        if q and name == q.lstrip('?!/ '):
+            score += 100
+        if q and name.replace(' ', '') == q.lstrip('?!/ ').replace(' ', ''):
+            score += 90
+        if q_tokens:
+            score += sum(8 for token in q_tokens if token in haystack)
+        if not q:
+            score = 1
+        commands_list.append((score, name, description, aliases, _command_usage(command)))
+
+    commands_list.sort(key=lambda row: (-row[0], row[1]))
+    lines: list[str] = []
+    size = 0
+    for score, name, description, aliases, usage in commands_list:
+        alias_text = f" | aliases: {', '.join(aliases[:5])}" if aliases else ''
+        line = f"- `{usage}` — {description[:180]}{alias_text}"
+        if size + len(line) + 1 > max_chars:
+            break
+        lines.append(line)
+        size += len(line) + 1
+
+    if not lines:
+        return 'No registered bot commands were found.'
+    return '\n'.join(lines)
+
 
 def _is_owner(user_id: int) -> bool:
     return int(user_id) in BOT_OWNER_IDS
@@ -352,12 +418,20 @@ async def _gemini(text: str, ctx: commands.Context, data: dict[str, Any]) -> tup
             for s in (data.get('ruleSheets') or [])
         ],
     }
-    prompt = f"""You are the AI manager for the Discord server {ctx.guild.name!r}. You are helpful, knowledgeable, and use both server-specific knowledge AND your own general reasoning.
+    command_docs = _command_catalog(text)
+    prompt = f"""You are the AI manager for the Discord server {ctx.guild.name!r}. You are helpful, knowledgeable, and use the server's live bot command documentation, server-specific data, and your own general reasoning.
+
+LIVE BOT COMMANDS (generated from commands currently registered on this bot):
+{command_docs}
 
 SERVER KNOWLEDGE (prices, rules, services configured for this server):
 {json.dumps(knowledge, ensure_ascii=False)}
 
 INSTRUCTIONS:
+- IMPORTANT: If the user asks how to use, find, run, configure, or troubleshoot a bot command, prefer the LIVE BOT COMMANDS section. Give the exact command name and usage when available.
+- NEVER invent a bot command, argument, alias, feature, or command behavior that is not supported by the live command documentation.
+- If a requested command is not in the live documentation, say that you could not find that command in the currently loaded bot commands, then suggest the closest relevant command if one is listed.
+- When explaining a command, include its prefix/slash form when appropriate (`?command` and `/command`) and explain required arguments in simple terms.
 - If the question is about THIS SERVER's prices, services, or specific rules: answer using the server knowledge above. If a specific price/rule is not configured, say so clearly.
 - If the question is about general moderation, Discord management, handling situations (scams, disputes, staff issues, etc.): use your general knowledge and best judgment to give a helpful, practical answer. Do NOT say "it is not configured" for general advice questions.
 - Always be concise and actionable. Write like a helpful senior staff member, not a bot.
@@ -571,7 +645,7 @@ async def ai_help(ctx: commands.Context):
     data = await get_guild(ctx.guild.id)
     role_text = f"<@&{data['managerRoleId']}>" if data.get('managerRoleId') else 'Not set (staff permissions)'
     embed = style_embed('AI Manager Help', description='Use AI as a private, server-specific assistant. It reads only this server’s imported prices, rules, and services.', kind='info')
-    embed.add_field(name='🤖 Ask AI', value='`?ai <question>` or `/ai <question>`\nWith premium non-prefix enabled: `ai <question>`', inline=False)
+    embed.add_field(name='🤖 Ask AI', value='`?ai <question>` or `/ai <question>`\nWith premium non-prefix enabled: `ai <question>`\nAI Help now reads the bot’s currently registered commands, so you can ask things like `?ai how do I use the revenue command?` and it will explain the matching command instead of guessing.', inline=False)
     embed.add_field(name='📥 Import Data', value='`?aiimportprice [title]` / `/aiimportprice [title]` — start a bulk price import. Paste the full text across multiple messages, then type `done`.\n`?aiimportrules [title]` / `/aiimportrules [title]` — start a bulk rules/policy import. Paste the full text across multiple messages, then type `done`.\nDuring an import: send more text, `done` = save, `cancel` = discard.\nWith AI non-prefix enabled, the same commands can be typed without `?`.', inline=False)
     embed.add_field(name='💰 Prices', value='`?aiprice set <service> <price>` — add/update a price.\n`?aiprice list` — view prices.\n`?aiprice remove <service>` — remove one.\n`?aiprice clear` — delete all prices.', inline=False)
     embed.add_field(name='📜 Rules', value='`?airule add <rule>` — add a rule.\n`?airule list` — view rules.\n`?airule remove <number>` — remove one.\n`?airule clear` — delete all rules.', inline=False)
