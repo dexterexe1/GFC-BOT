@@ -15,7 +15,6 @@ def _all_command_names():
     """Return every registered prefix and slash command name, deduplicated."""
     names = set()
 
-    # Prefix commands (including commands nested in command groups).
     for command in bot.walk_commands():
         if getattr(command, "hidden", False):
             continue
@@ -23,7 +22,6 @@ def _all_command_names():
         if name:
             names.add(name)
 
-    # Application/slash commands, including slash command groups.
     try:
         for command in bot.tree.walk_commands():
             name = getattr(command, "qualified_name", None) or getattr(command, "name", None)
@@ -41,12 +39,16 @@ def _category_for(command_name: str) -> str:
         "ban": "🛡️ Moderation", "kick": "🛡️ Moderation", "timeout": "🛡️ Moderation",
         "warn": "🛡️ Moderation", "mute": "🛡️ Moderation", "unmute": "🛡️ Moderation",
         "purge": "🛡️ Moderation", "slowmode": "🛡️ Moderation", "mod": "🛡️ Moderation",
-        "addrole": "🎭 Roles", "role": "🎭 Roles", "reactionrole": "🎭 Roles",
+        "addrole": "🎭 Roles", "role": "🎭 Roles", "roles": "🎭 Roles",
+        "roleinfo": "🎭 Roles", "rolefullinfo": "🎭 Roles", "rolehelp": "🎭 Roles",
         "revenue": "💰 Revenue", "setrevenuechannel": "💰 Revenue",
-        "clearrevenuechannel": "💰 Revenue",
-        "play": "🎵 Music", "skip": "🎵 Music", "queue": "🎵 Music", "stop": "🎵 Music",
-        "pause": "🎵 Music", "resume": "🎵 Music", "volume": "🎵 Music", "loop": "🎵 Music",
-        "hug": "😂 Fun", "kiss": "😂 Fun", "slap": "😂 Fun", "pat": "😂 Fun", "ship": "😂 Fun",
+        "clearrevenuechannel": "💰 Revenue", "weekrevenue": "💰 Revenue",
+        "monthrevenue": "💰 Revenue", "todayrevenue": "💰 Revenue",
+        "allrevenue": "💰 Revenue", "revenuedetails": "💰 Revenue",
+        "revenuevia": "💰 Revenue", "revenuehelp": "💰 Revenue",
+        "vouch": "✅ Vouch", "unvouch": "✅ Vouch", "vouches": "✅ Vouch",
+        "vouchleaderboard": "✅ Vouch", "setvouchchannel": "✅ Vouch",
+        "clearvouchchannel": "✅ Vouch",
         "owneronlymode": "👑 Developer", "lockbot": "👑 Developer", "devhelp": "👑 Developer",
         "developerhelp": "👑 Developer", "devcommands": "👑 Developer",
         "disablecommand": "👑 Developer", "disablecmd": "👑 Developer",
@@ -55,9 +57,12 @@ def _category_for(command_name: str) -> str:
         "togglenoprefix": "👑 Developer", "noprefixmode": "👑 Developer",
         "botstatus": "👑 Developer", "botinfo": "👑 Developer",
         "commands": "📚 General", "commandsinfo": "📚 General",
-        "ai": "🤖 AI Manager", "aihelp": "🤖 AI Manager", "aiimportprice": "🤖 AI Manager", "aiimportrules": "🤖 AI Manager",
-        "aiprice": "🤖 AI Manager", "airule": "🤖 AI Manager", "aiservice": "🤖 AI Manager", "aiconfig": "🤖 AI Manager", "aiclear": "🤖 AI Manager",
-        "provideai": "👑 Developer", "disableai": "👑 Developer", "providenonprefix": "👑 Developer", "disablenonprefix": "👑 Developer",
+        "help": "📚 General", "ping": "📚 General", "serverinfo": "📚 General",
+        "ai": "🤖 AI Manager", "aihelp": "🤖 AI Manager", "aiimportprice": "🤖 AI Manager",
+        "aiimportrules": "🤖 AI Manager", "aiprice": "🤖 AI Manager", "airule": "🤖 AI Manager",
+        "aiservice": "🤖 AI Manager", "aiconfig": "🤖 AI Manager", "aiclear": "🤖 AI Manager",
+        "provideai": "👑 Developer", "disableai": "👑 Developer",
+        "providenonprefix": "👑 Developer", "disablenonprefix": "👑 Developer",
         "aistatus": "👑 Developer", "ailist": "👑 Developer",
     }
     return mapping.get(root, "📦 Other")
@@ -81,28 +86,36 @@ def _chunk_lines(lines, max_chars=950):
     description="Show the bot's command names grouped by category.",
 )
 async def commands_list(ctx: commands.Context):
-    names = _all_command_names()
-    categories = {}
-    for name in names:
-        categories.setdefault(_category_for(name), []).append(name)
+    try:
+        names = _all_command_names()
+        categories = {}
+        for name in names:
+            categories.setdefault(_category_for(name), []).append(name)
 
-    embed = style_embed(
-        title=f"{BRAND_EMOJI} GFC Bot Commands",
-        description="All currently registered command names. No usage text — just the names.",
-        color=BRAND_COLOR,
-        kind="info",
-    )
+        fields = []
+        for category in sorted(categories, key=lambda x: x.lower()):
+            value = "\n".join(f"• `{name}`" for name in categories[category])
+            parts = _chunk_lines(value.splitlines(), 950)
+            for index, part in enumerate(parts):
+                field_name = category if index == 0 else f"{category} (continued)"
+                fields.append((field_name, part))
 
-    for category in sorted(categories, key=lambda x: x.lower()):
-        value = "\n".join(f"• `?{name}`" for name in categories[category])
-        # Discord field values have a 1024-char limit.
-        parts = _chunk_lines(value.splitlines(), 950)
-        for index, part in enumerate(parts):
-            field_name = category if index == 0 else f"{category} (continued)"
-            embed.add_field(name=field_name, value=part, inline=False)
-
-    embed.set_footer(text=f"{len(names)} registered command names • GFC Bot")
-    await ctx.send(embed=embed)
+        pages = [fields[i : i + 20] for i in range(0, max(len(fields), 1), 20)] or [[]]
+        for page_i, page_fields in enumerate(pages, start=1):
+            desc = "Registered command names."
+            if len(pages) > 1:
+                desc += f" (page {page_i}/{len(pages)})"
+            embed = style_embed(
+                title=f"{BRAND_EMOJI} GFC Bot Commands",
+                description=desc,
+                kind="info",
+            )
+            for field_name, part in page_fields:
+                embed.add_field(name=field_name, value=part or "—", inline=False)
+            embed.set_footer(text=f"{len(names)} commands • GFC Bot")
+            await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"❌ commands error: `{e}`")
 
 
 @bot.hybrid_command(
@@ -110,17 +123,22 @@ async def commands_list(ctx: commands.Context):
     description="Show every registered command name in the bot.",
 )
 async def commands_info(ctx: commands.Context):
-    names = _all_command_names()
-    lines = [f"• `?{name}`" for name in names]
-    chunks = _chunk_lines(lines, 3500)
-
-    for index, chunk in enumerate(chunks, start=1):
-        title = f"{BRAND_EMOJI} All Commands" if len(chunks) == 1 else f"{BRAND_EMOJI} All Commands • {index}/{len(chunks)}"
-        embed = style_embed(
-            title=title,
-            description=chunk,
-            color=BRAND_COLOR,
-            kind="info",
-        )
-        embed.set_footer(text=f"{len(names)} registered command names • GFC Bot")
-        await ctx.send(embed=embed)
+    try:
+        names = _all_command_names()
+        lines = [f"• `{name}`" for name in names]
+        chunks = _chunk_lines(lines, 3500)
+        for index, chunk in enumerate(chunks, start=1):
+            title = (
+                f"{BRAND_EMOJI} All Commands"
+                if len(chunks) == 1
+                else f"{BRAND_EMOJI} All Commands • {index}/{len(chunks)}"
+            )
+            embed = style_embed(
+                title=title,
+                description=chunk or "No commands found.",
+                kind="info",
+            )
+            embed.set_footer(text=f"{len(names)} commands • GFC Bot")
+            await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"❌ commandsinfo error: `{e}`")
