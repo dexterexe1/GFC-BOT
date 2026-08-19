@@ -140,7 +140,7 @@ async def on_ready():
         synced = await bot.tree.sync()
         print(f"🔄 Successfully synced {len(synced)} slash commands globally!")
 
-        from bot.config import ALLOWED_GUILD_IDS
+        # Use already-imported module global (do NOT re-import name here — causes UnboundLocalError)
         guild_ids = list(ALLOWED_GUILD_IDS) if ALLOWED_GUILD_IDS else [g.id for g in bot.guilds]
         for gid in guild_ids:
             try:
