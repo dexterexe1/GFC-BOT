@@ -31,7 +31,7 @@ BOT_OWNER_IDS = [
 # Only these guild IDs may use the bot. Leave empty [] to allow all (not recommended).
 # Fill in your 4 server IDs (right-click server → Copy Server ID with Developer Mode on).
 ALLOWED_GUILD_IDS = [
-    # 123456789012345678,  # Server 1
+   1538193537412370433
     # 234567890123456789,  # Server 2
     # 345678901234567890,  # Server 3
     # 456789012345678901,  # Server 4
