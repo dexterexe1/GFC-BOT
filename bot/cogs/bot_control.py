@@ -84,162 +84,91 @@ async def command_enabled_check(ctx):
 #         OWNER-ONLY MODE TOGGLE
 # ==========================================
 
-@bot.command(name="owneronlymode", aliases=["lockbot"], help="Toggle owner-only mode (owners only)")
-async def owner_only_mode_cmd(ctx: commands.Context, enabled: Optional[bool] = None):
-    """Enable/disable owner-only mode."""
-    # Check if command issuer is a bot owner
-    if not is_bot_owner(ctx.author.id):
-        await ctx.send(
-            embed=style_embed(
-                title="❌ Unauthorized",
-                description="Only bot owners can toggle owner-only mode.",
-                kind="error"
-            )
-        )
-        return
-    
-    # Toggle if not specified
-    if enabled is None:
-        enabled = not is_owner_only_mode()
-    
-    set_owner_only_mode(enabled)
-    
-    if enabled:
-        embed = style_embed(
-            title="🔒 Owner-Only Mode Enabled",
-            description="The bot is now **locked**.\n\n"
-                       "Only authorized bot owners can use commands.\n"
-                       "All other users will be denied access.",
-            kind="success"
-        )
-    else:
-        embed = style_embed(
-            title="🔓 Owner-Only Mode Disabled",
-            description="The bot is now **unlocked**.\n\n"
-                       "All users can use commands normally (subject to permission checks).",
-            kind="success"
-        )
-    
-    await ctx.send(embed=embed)
-
-
-# ==========================================
-#         DEVELOPER HELP
-# ==========================================
-
-def _is_developer_command(command: commands.Command) -> bool:
-    """Detect commands that explicitly use the bot-owner authorization check."""
-    callback = getattr(command, "callback", None)
-    code = getattr(callback, "__code__", None)
-    if code is None:
-        return False
-
-    # Owner-restricted commands in this project call is_bot_owner().
-    # This keeps the help menu automatically synchronized with registered
-    # commands instead of maintaining a second hard-coded command list.
-    return "is_bot_owner" in code.co_names or "_is_owner" in code.co_names
-
-
-def _developer_command_category(command: commands.Command) -> str:
-    """Choose a useful category for the developer command menu."""
-    name = (command.name or "").lower()
-
-    if name in {"owneronlymode", "lockbot", "botstatus", "botinfo"}:
-        return "👑 Developer / Owner"
-    if "disable" in name or "enable" in name:
-        return "🛠️ Command Management"
-    if "revenue" in name:
-        return "💰 Revenue"
-    if "prefix" in name:
-        return "⚙️ Bot Configuration"
-    if name in {"provideai", "disableai", "providenonprefix", "disablenonprefix", "aistatus", "ailist"}:
-        return "🤖 Premium AI Management"
-    return "🔧 Other Developer Tools"
-
-
-@bot.command(
+@bot.hybrid_command(
     name="devhelp",
     aliases=["developerhelp", "devcommands"],
-    help="Show developer-only bot commands (owners only)"
+    help="Show developer-only bot commands (owners only)",
+    description="Show developer-only bot commands (owners only)",
 )
 async def developer_help_cmd(ctx: commands.Context):
     """Show the commands available to bot owners."""
-    if not is_bot_owner(ctx.author.id):
-        await ctx.send(
-            embed=style_embed(
-                title="❌ Unauthorized",
-                description="Only bot owners can use the developer help menu.",
-                kind="error"
+    try:
+        if not is_bot_owner(ctx.author.id):
+            await ctx.send(
+                embed=style_embed(
+                    title="Unauthorized",
+                    description=(
+                        "Only bot owners can use ?devhelp.\n"
+                        "Add your Discord user ID to BOT_OWNER_IDS in bot/config.py."
+                    ),
+                    kind="error",
+                )
             )
+            return
+
+        static = {
+            "Developer / Owner": [
+                "`?owneronlymode [on|off]` — Lock bot to owners only",
+                "`?lockbot` — Alias for owner-only mode",
+                "`?botstatus` / `?botinfo` — Bot status info",
+                "`?devhelp` — This menu",
+            ],
+            "Command Management": [
+                "`?disablecommand <name> [server|global]` — Disable a command",
+                "`?enablecommand <name> [server|global]` — Re-enable a command",
+                "`?disabledcommands` — List disabled commands",
+            ],
+            "No-prefix / modes": [
+                "`?togglenoprefix` / `?noprefixmode` — Toggle no-prefix mode",
+            ],
+            "Premium AI (owner)": [
+                "`?provideai` / `?disableai`",
+                "`?providenonprefix` / `?disablenonprefix`",
+                "`?aistatus` / `?ailist`",
+            ],
+        }
+
+        live_lines = []
+        try:
+            for command in sorted(bot.commands, key=lambda c: c.name.lower()):
+                if command.hidden:
+                    continue
+                if _is_developer_command(command):
+                    sig = getattr(command, "signature", "") or ""
+                    usage = f"?{command.name}" + (f" {sig}" if sig else "")
+                    desc = (command.help or command.description or "").strip()
+                    if len(desc) > 80:
+                        desc = desc[:77] + "..."
+                    live_lines.append(f"`{usage}`" + (f" — {desc}" if desc else ""))
+        except Exception:
+            pass
+
+        embed = style_embed(
+            title="Developer Command Center",
+            description="Owner-only tools. You are authorized.",
+            kind="info",
         )
-        return
+        for cat, lines in static.items():
+            embed.add_field(name=cat, value="\n".join(lines), inline=False)
 
-    # Read the currently registered commands at runtime and detect commands
-    # whose callbacks explicitly use the existing bot-owner authorization.
-    developer_commands = [
-        command for command in bot.commands
-        if not command.hidden and _is_developer_command(command)
-    ]
+        if live_lines:
+            chunk, chunks, size = [], [], 0
+            for line in live_lines:
+                if chunk and size + len(line) + 1 > 1000:
+                    chunks.append("\n".join(chunk))
+                    chunk, size = [], 0
+                chunk.append(line)
+                size += len(line) + 1
+            if chunk:
+                chunks.append("\n".join(chunk))
+            for i, ch in enumerate(chunks[:5]):
+                name = "Registered owner commands" if i == 0 else f"Registered owner commands ({i + 1})"
+                embed.add_field(name=name, value=ch, inline=False)
 
-    categories = {}
-    for command in developer_commands:
-        category = _developer_command_category(command)
-        categories.setdefault(category, []).append(command)
-
-    embed = style_embed(
-        title="👑 Developer Command Center",
-        description="Developer-only commands currently registered in the bot.",
-        color=BRAND_COLOR,
-        kind="info"
-    )
-
-    category_order = [
-        "👑 Developer / Owner",
-        "🛠️ Command Management",
-        "💰 Revenue",
-        "⚙️ Bot Configuration",
-        "🤖 Premium AI Management",
-        "🔧 Other Developer Tools",
-    ]
-
-    for category in category_order:
-        commands_in_category = categories.get(category, [])
-        if not commands_in_category:
-            continue
-
-        lines = []
-        for command in sorted(commands_in_category, key=lambda c: c.name.lower()):
-            description = command.help or command.description or "No description available."
-            description = " ".join(description.split())
-            if len(description) > 100:
-                description = description[:97] + "..."
-
-            signature = getattr(command, "signature", "") or ""
-            usage = f"?{command.name}"
-            if signature:
-                usage += f" {signature}"
-
-            lines.append(f"`{usage}` — {description}")
-
-        # Discord embed fields have a 1024-character value limit.
-        chunks = []
-        current = ""
-        for line in lines:
-            if len(current) + len(line) + 1 > 1000:
-                if current:
-                    chunks.append(current)
-                current = line
-            else:
-                current = f"{current}\n{line}".strip()
-        if current:
-            chunks.append(current)
-
-        for index, chunk in enumerate(chunks):
-            field_name = category if index == 0 else f"{category} (continued)"
-            embed.add_field(name=field_name, value=chunk, inline=False)
-
-    embed.set_footer(text="Developer Tools • United Bunnies")
-    await ctx.send(embed=embed)
+        embed.set_footer(text="Developer Tools • United Bunnies")
+        await ctx.send(embed=embed)
+    except Exception as e:
+        await ctx.send(f"devhelp error: `{e}`")
 
 
 # ==========================================
