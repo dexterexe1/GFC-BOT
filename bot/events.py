@@ -129,8 +129,30 @@ async def on_ready():
         print(f"⚠️ Failed to re-register role menus: {e}")
 
     try:
+        existing = bot.tree.get_command("mod")
+        if existing is not None:
+            bot.tree.remove_command("mod")
+        try:
+            from bot.config import mod_group
+            bot.tree.add_command(mod_group)
+        except discord.app_commands.CommandAlreadyRegistered:
+            pass
+        except Exception:
+            pass
+
         synced = await bot.tree.sync()
         print(f"🔄 Successfully synced {len(synced)} slash commands globally!")
+
+        from bot.config import ALLOWED_GUILD_IDS
+        guild_ids = list(ALLOWED_GUILD_IDS) if ALLOWED_GUILD_IDS else [g.id for g in bot.guilds]
+        for gid in guild_ids:
+            try:
+                g = discord.Object(id=int(gid))
+                bot.tree.copy_global_to(guild=g)
+                gs = await bot.tree.sync(guild=g)
+                print(f"🔄 Guild sync {gid}: {len(gs)} commands")
+            except Exception as ge:
+                print(f"⚠️ Guild sync failed for {gid}: {ge}")
     except Exception as e:
         print(f"❌ Failed to sync slash commands: {e}")
 
