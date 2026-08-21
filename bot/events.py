@@ -458,7 +458,7 @@ async def on_message(message):
                 embed.add_field(name="Comment", value=reason, inline=False)
             embed.set_footer(text=f"{target.display_name} now has {total} vouch(es)")
 
-            await message.reply(embed=embed, mention_author=False)
+            await message.reply(embed=embed, mention_author=False, delete_after=5)
             return
 
     # --- DASHBOARD CUSTOM COMMANDS (from the website's "Custom Commands" tab) ---
